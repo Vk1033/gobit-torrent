@@ -47,11 +47,9 @@ func decodeBencode(bencodedString string) (interface{}, error) {
 		}
 		return intValue, nil
 	} else if rune(bencodedString[0]) == 'l' {
-		var list []any
-		var endIndex int
+		list := []any{}
 		for i := 1; i < len(bencodedString); i++ {
 			if bencodedString[i] == 'e' {
-				endIndex = i
 				break
 			}
 			value, err := decodeBencode(bencodedString[i:])
@@ -62,13 +60,11 @@ func decodeBencode(bencodedString string) (interface{}, error) {
 			i += len(fmt.Sprintf("%v", value)) + 1
 
 		}
-		if endIndex == 0 {
-			return "", fmt.Errorf("INVALID BENCODED LIST")
-		}
+
 		return list, nil
 	}
 
-	return "", fmt.Errorf("UNSUPPORTED TYPE")
+	return nil, fmt.Errorf("UNSUPPORTED TYPE")
 }
 
 func main() {
