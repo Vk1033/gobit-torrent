@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/sha1"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -165,6 +166,15 @@ func main() {
 		fmt.Printf("Tracker URL: %s\n", dict["announce"])
 		fmt.Printf("Length: %d\n", info["length"])
 		fmt.Printf("Info Hash: %x\n", hash)
+		fmt.Printf("Piece Length: %d\n", info["piece length"])
+		fmt.Printf("Piece Hashes:\n")
+
+		piecesStr := info["pieces"].(string)
+		bytesPieces := []byte(piecesStr)
+		for i := 0; i < len(bytesPieces); i += 20 {
+			pieceHash := bytesPieces[i : i+20]
+			fmt.Println(hex.EncodeToString(pieceHash))
+		}
 
 	} else {
 		fmt.Println("Unknown command: " + command)
