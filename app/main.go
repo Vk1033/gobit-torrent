@@ -11,11 +11,12 @@ import (
 
 var _ = json.Marshal
 
-func decodeBencode(bencodedString string) (interface{}, error) {
+func decodeBencode(bencodedString string) (any, int, error) {
 	if unicode.IsDigit(rune(bencodedString[0])) {
 		var firstColonIndex int
+		var i int
 
-		for i := 0; i < len(bencodedString); i++ {
+		for i = 0; i < len(bencodedString); i++ {
 			if bencodedString[i] == ':' {
 				firstColonIndex = i
 				break
@@ -26,64 +27,66 @@ func decodeBencode(bencodedString string) (interface{}, error) {
 
 		length, err := strconv.Atoi(lengthStr)
 		if err != nil {
-			return "", err
+			return "", 0, err
 		}
-
-		return bencodedString[firstColonIndex+1 : firstColonIndex+1+length], nil
+		return bencodedString[firstColonIndex+1 : firstColonIndex+1+length], i + length, nil
 	} else if rune(bencodedString[0]) == 'i' {
 		var endIndex int
-		for i := 1; i < len(bencodedString); i++ {
+		var i int
+		for i = 1; i < len(bencodedString); i++ {
 			if bencodedString[i] == 'e' {
 				endIndex = i
 				break
 			}
 		}
 		if endIndex == 0 {
-			return "", fmt.Errorf("INVALID BENCODED INTEGER")
+			return "", 0, fmt.Errorf("INVALID BENCODED INTEGER")
 		}
 		intValue, err := strconv.Atoi(bencodedString[1:endIndex])
 		if err != nil {
-			return "", err
+			return "", 0, err
 		}
-		return intValue, nil
+		return intValue, i, nil
 	} else if rune(bencodedString[0]) == 'l' {
 		list := []any{}
-		for i := 1; i < len(bencodedString); i++ {
+		var i int
+		for i = 1; i < len(bencodedString); {
 			if bencodedString[i] == 'e' {
 				break
 			}
-			value, err := decodeBencode(bencodedString[i:])
+			value, valueLen, err := decodeBencode(bencodedString[i:])
 			if err != nil {
-				return "", err
+				return "", 0, err
 			}
 			list = append(list, value)
-			i += len(fmt.Sprintf("%v", value)) + 1
+			i += valueLen + 1
 
 		}
 
-		return list, nil
+		return list, i, nil
 	} else if rune(bencodedString[0]) == 'd' {
 		dict := map[string]any{}
-		for i := 1; i < len(bencodedString); i++ {
+		var i int
+		for i = 1; i < len(bencodedString); {
 			if bencodedString[i] == 'e' {
 				break
 			}
-			key, err := decodeBencode(bencodedString[i:])
+			key, keyLen, err := decodeBencode(bencodedString[i:])
 			if err != nil {
-				return "", err
+				return "", 0, err
 			}
-			i += len(fmt.Sprintf("%v", key)) + 2
-			value, err := decodeBencode(bencodedString[i:])
+			i += keyLen + 1
+			value, valueLen, err := decodeBencode(bencodedString[i:])
 			if err != nil {
-				return "", err
+				return "", 0, err
 			}
 			dict[fmt.Sprintf("%v", key)] = value
-			i += len(fmt.Sprintf("%v", value)) + 1
+			i += valueLen + 1
 		}
-		return dict, nil
+		return dict, i, nil
 	}
 
-	return nil, fmt.Errorf("UNSUPPORTED TYPE")
+	return nil, 0, fmt.Errorf("UNSUPPORTED TYPE")
 }
 
 func main() {
@@ -92,7 +95,7 @@ func main() {
 	if command == "decode" {
 		bencodedValue := os.Args[2]
 
-		decoded, err := decodeBencode(bencodedValue)
+		decoded, _, err := decodeBencode(bencodedValue)
 		if err != nil {
 			fmt.Println(err)
 			return
