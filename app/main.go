@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"sort"
 	"strconv"
@@ -174,6 +176,93 @@ func main() {
 		for i := 0; i < len(bytesPieces); i += 20 {
 			pieceHash := bytesPieces[i : i+20]
 			fmt.Println(hex.EncodeToString(pieceHash))
+		}
+
+	} else if command == "peers" {
+		fileName := os.Args[2]
+		data, err := os.ReadFile(fileName)
+		if err != nil {
+			panic(err)
+		}
+		bencodedString := string(data)
+		decoded, _, err := decodeBencode(bencodedString)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		dict, ok := decoded.(map[string]any)
+		if !ok {
+			fmt.Println("Invalid bencoded data")
+			return
+		}
+		info, ok := dict["info"].(map[string]any)
+		if !ok {
+			fmt.Println("Invalid bencoded data")
+			return
+		}
+		client := &http.Client{}
+
+		trackerURL := dict["announce"].(string)
+
+		req, err := http.NewRequest(http.MethodGet, trackerURL, nil)
+		if err != nil {
+			return
+		}
+		encodedInfo := bencodeEncode(info)
+		hash := sha1.Sum([]byte(encodedInfo))
+		infoHash := fmt.Sprintf("%s", hash)
+		length := info["length"].(int)
+
+		peer_id := "-AZ2060-123456789012"
+		url := req.URL.Query()
+		url.Add("info_hash", infoHash)
+		url.Add("peer_id", peer_id)
+		url.Add("port", "6881")
+		url.Add("uploaded", "0")
+		url.Add("downloaded", "0")
+		url.Add("left", strconv.Itoa(length))
+		url.Add("compact", "1")
+		req.URL.RawQuery = url.Encode()
+		res, err := client.Do(req)
+		if err != nil {
+			return
+		}
+
+		defer res.Body.Close()
+
+		if res.StatusCode != http.StatusOK {
+			fmt.Println("Error: ", res.Status)
+			return
+		}
+		bencodedData, err := io.ReadAll(res.Body)
+		if err != nil {
+			fmt.Println("Error reading response body:", err)
+			return
+		}
+		decoded, _, err = decodeBencode(string(bencodedData))
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		dict, ok = decoded.(map[string]any)
+		if !ok {
+			fmt.Println("Invalid bencoded data")
+			return
+		}
+		peers, ok := dict["peers"].(string)
+		if !ok {
+			fmt.Println("Invalid bencoded data")
+			return
+		}
+		peersBytes := []byte(peers)
+		if len(peersBytes)%6 != 0 {
+			fmt.Println("Invalid peers data")
+			return
+		}
+		for i := 0; i < len(peersBytes); i += 6 {
+			ip := fmt.Sprintf("%d.%d.%d.%d", peersBytes[i], peersBytes[i+1], peersBytes[i+2], peersBytes[i+3])
+			port := (int(peersBytes[i+4]) << 8) + int(peersBytes[i+5])
+			fmt.Printf("%s:%d\n", ip, port)
 		}
 
 	} else {
