@@ -62,6 +62,25 @@ func decodeBencode(bencodedString string) (interface{}, error) {
 		}
 
 		return list, nil
+	} else if rune(bencodedString[0]) == 'd' {
+		dict := map[string]any{}
+		for i := 1; i < len(bencodedString); i++ {
+			if bencodedString[i] == 'e' {
+				break
+			}
+			key, err := decodeBencode(bencodedString[i:])
+			if err != nil {
+				return "", err
+			}
+			i += len(fmt.Sprintf("%v", key)) + 2
+			value, err := decodeBencode(bencodedString[i:])
+			if err != nil {
+				return "", err
+			}
+			dict[fmt.Sprintf("%v", key)] = value
+			i += len(fmt.Sprintf("%v", value)) + 1
+		}
+		return dict, nil
 	}
 
 	return nil, fmt.Errorf("UNSUPPORTED TYPE")
