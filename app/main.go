@@ -34,15 +34,27 @@ func decodeBencode(bencodedString string) (interface{}, error) {
 		}
 
 		return bencodedString[firstColonIndex+1 : firstColonIndex+1+length], nil
-	} else {
-		return "", fmt.Errorf("ONLY STRINGS ARE SUPPORTED")
+	} else if rune(bencodedString[0]) == 'i' {
+		var endIndex int
+		for i := 1; i < len(bencodedString); i++ {
+			if bencodedString[i] == 'e' {
+				endIndex = i
+				break
+			}
+		}
+		if endIndex == 0 {
+			return "", fmt.Errorf("INVALID BENCODED INTEGER")
+		}
+		intValue, err := strconv.Atoi(bencodedString[1:endIndex])
+		if err != nil {
+			return "", err
+		}
+		return intValue, nil
 	}
+	return "", fmt.Errorf("UNSUPPORTED TYPE")
 }
 
 func main() {
-	// You can use print statements as follows for debugging, they'll be visible when running tests.
-	fmt.Fprintln(os.Stderr, "Logs from your program will appear here!")
-
 	command := os.Args[1]
 
 	if command == "decode" {
