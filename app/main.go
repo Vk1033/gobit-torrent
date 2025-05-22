@@ -103,6 +103,32 @@ func main() {
 
 		jsonOutput, _ := json.Marshal(decoded)
 		fmt.Println(string(jsonOutput))
+	} else if command == "info" {
+		fileName := os.Args[2]
+		data, err := os.ReadFile(fileName)
+		if err != nil {
+			panic(err)
+		}
+		bencodedString := string(data)
+		decoded, _, err := decodeBencode(bencodedString)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		dict, ok := decoded.(map[string]any)
+		if !ok {
+			fmt.Println("Invalid bencoded data")
+			return
+		}
+		info, ok := dict["info"].(map[string]any)
+		if !ok {
+			fmt.Println("Invalid bencoded data")
+			return
+		}
+
+		fmt.Printf("Tracker URL: %s\n", dict["announce"])
+		fmt.Printf("Length: %d\n", info["length"])
+
 	} else {
 		fmt.Println("Unknown command: " + command)
 		os.Exit(1)
