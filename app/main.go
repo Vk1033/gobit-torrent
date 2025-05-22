@@ -1,9 +1,11 @@
 package main
 
 import (
+	"crypto/sha1"
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"unicode"
 	// bencode "github.com/jackpal/bencode-go"
@@ -89,6 +91,38 @@ func decodeBencode(bencodedString string) (any, int, error) {
 	return nil, 0, fmt.Errorf("UNSUPPORTED TYPE")
 }
 
+func bencodeEncode(value any) string {
+	switch v := value.(type) {
+	case string:
+		return fmt.Sprintf("%d:%s", len(v), v)
+	case int:
+		return fmt.Sprintf("i%de", v)
+	case []any:
+		result := "l"
+		for _, item := range v {
+			result += bencodeEncode(item)
+		}
+		result += "e"
+		return result
+	case map[string]any:
+		result := "d"
+		// keys must be sorted
+		keys := make([]string, 0, len(v))
+		for k := range v {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			result += bencodeEncode(k)
+			result += bencodeEncode(v[k])
+		}
+		result += "e"
+		return result
+	default:
+		panic(fmt.Sprintf("Unsupported type: %T", v))
+	}
+}
+
 func main() {
 	command := os.Args[1]
 
@@ -125,9 +159,12 @@ func main() {
 			fmt.Println("Invalid bencoded data")
 			return
 		}
+		encodedInfo := bencodeEncode(info)
+		hash := sha1.Sum([]byte(encodedInfo))
 
 		fmt.Printf("Tracker URL: %s\n", dict["announce"])
 		fmt.Printf("Length: %d\n", info["length"])
+		fmt.Printf("Info Hash: %x\n", hash)
 
 	} else {
 		fmt.Println("Unknown command: " + command)
