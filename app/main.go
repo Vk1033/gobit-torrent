@@ -54,17 +54,14 @@ func decodeBencode(bencodedString string) (interface{}, error) {
 				endIndex = i
 				break
 			}
-			fmt.Printf("Bencoded item: %s\n", bencodedString[i:])
 			value, err := decodeBencode(bencodedString[i:])
 			if err != nil {
 				return "", err
 			}
-			fmt.Printf("Decoded value: %v\n", value)
 			list = append(list, value)
 			i += len(fmt.Sprintf("%v", value)) + 1
 
 		}
-		fmt.Printf("Bencoded list: %s\n", bencodedString)
 		if endIndex == 0 {
 			return "", fmt.Errorf("INVALID BENCODED LIST")
 		}
