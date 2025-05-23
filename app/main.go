@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"sort"
 	"strconv"
+	"time"
 	"unicode"
 	// bencode "github.com/jackpal/bencode-go"
 )
@@ -264,6 +266,62 @@ func main() {
 			port := (int(peersBytes[i+4]) << 8) + int(peersBytes[i+5])
 			fmt.Printf("%s:%d\n", ip, port)
 		}
+
+	} else if command == "handshake" {
+		fileName := os.Args[2]
+		address := os.Args[3]
+
+		data, err := os.ReadFile(fileName)
+		if err != nil {
+			panic(err)
+		}
+		bencodedString := string(data)
+		decoded, _, err := decodeBencode(bencodedString)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		dict, ok := decoded.(map[string]any)
+		if !ok {
+			fmt.Println("Invalid bencoded data")
+			return
+		}
+		info, ok := dict["info"].(map[string]any)
+		if !ok {
+			fmt.Println("Invalid bencoded data")
+			return
+		}
+		conn, err := net.DialTimeout("tcp", address, 30*time.Second)
+		if err != nil {
+			fmt.Println("Error connecting to peer:", err)
+			return
+		}
+		defer conn.Close()
+		encodedInfo := bencodeEncode(info)
+		hash := sha1.Sum([]byte(encodedInfo))
+		infoHash := fmt.Sprintf("%s", hash)
+
+		handShake := make([]byte, 68)
+		handShake[0] = 19
+		copy(handShake[1:], "BitTorrent protocol")
+		copy(handShake[28:], infoHash)
+		copy(handShake[48:], "-AZ2060-123456789012")
+		handShake[68-1] = 0
+		_, err = conn.Write(handShake)
+		if err != nil {
+			fmt.Println("Error writing handshake:", err)
+			return
+		}
+		// Read the response
+		response := make([]byte, 68)
+		_, err = io.ReadFull(conn, response)
+		if err != nil {
+			fmt.Println("Error reading handshake response:", err)
+			return
+		}
+		// Print Peer ID
+		peerID := string(response[48:68])
+		fmt.Printf("Peer ID: %x\n", peerID)
 
 	} else {
 		fmt.Println("Unknown command: " + command)
