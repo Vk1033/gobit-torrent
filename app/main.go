@@ -450,7 +450,29 @@ func main() {
 			return
 		}
 		peerID := res[48:68]
+		_, err = readBitfield(conn)
+		if err != nil {
+			fmt.Println("Error reading bitfield:", err)
+			return
+		}
 		fmt.Printf("Peer ID: %x\n", peerID)
+		// check if extension is supported
+		extensionReservedByte := res[25]
+		if extensionReservedByte != 16 {
+			fmt.Println("Peer doesnt support extensions:", err)
+			return
+		}
+
+		err = sendExtensionHandshake(conn)
+		if err != nil {
+			fmt.Println("Error during handshake:", err)
+		}
+
+		_, _, _, err = readExtensionMessage(conn)
+		if err != nil {
+			fmt.Println("Error reading handshake response:", err)
+			return
+		}
 
 	} else {
 		fmt.Println("Unknown command: " + command)

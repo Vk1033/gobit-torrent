@@ -465,3 +465,53 @@ func getPeersFromMagnet(trackerURL string, infoHash []byte) ([]string, error) {
 	// Return the list of peer addresses
 	return peerList, nil
 }
+
+func sendExtensionHandshake(conn net.Conn) error {
+
+	// Write the payload
+	dict := map[string]any{
+		"m": map[string]any{
+			"ut_metadata": 1,
+		},
+	}
+	bencode := bencodeEncode(dict)
+
+	msgLen := 2 + len(bencode)
+	msg := make([]byte, 4+msgLen)
+	binary.BigEndian.PutUint32(msg[0:4], uint32(msgLen))
+	msg[4] = 20 // Message ID = 20
+	msg[5] = 0  // extension message id
+	copy(msg[6:], []byte(bencode))
+
+	_, err := conn.Write(msg)
+	return err
+}
+
+func readExtensionMessage(conn net.Conn) (msgID, extID byte, header map[string]any, err error) {
+	lenBuf := make([]byte, 4)
+	if _, err = io.ReadFull(conn, lenBuf); err != nil {
+		return
+	}
+	msgLen := binary.BigEndian.Uint32(lenBuf)
+
+	msgBuf := make([]byte, msgLen)
+	if _, err = io.ReadFull(conn, msgBuf); err != nil {
+		return
+	}
+
+	msgID = msgBuf[0]
+	extID = msgBuf[1]
+	payload := msgBuf[2:]
+
+	// separate bencoded header and binary data
+
+	payloadStr := string(payload)
+
+	// use your bencodeDecode
+	headerDecoded, _, err := decodeBencode(payloadStr)
+	if err != nil {
+		fmt.Println("Error", err)
+	}
+	header = headerDecoded.(map[string]any)
+	return
+}
