@@ -255,6 +255,17 @@ func main() {
 			return
 		}
 		pieceLength := int(info["piece length"].(int))
+		// right after you fetch pieceLength from info
+		totalLength := int(info["length"].(int))
+		numPieces := (totalLength + pieceLength - 1) / pieceLength
+
+		if pieceIndex == numPieces-1 {
+			remaining := totalLength % pieceLength
+			if remaining != 0 {
+				pieceLength = remaining
+			}
+		}
+
 		begin := 0
 
 		for begin < pieceLength {
