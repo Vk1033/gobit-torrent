@@ -468,11 +468,13 @@ func main() {
 			fmt.Println("Error during handshake:", err)
 		}
 
-		_, _, _, err = readExtensionMessage(conn)
+		_, _, header, err := readExtensionMessage(conn)
 		if err != nil {
 			fmt.Println("Error reading handshake response:", err)
 			return
 		}
+		m := header["m"].(map[string]any)
+		fmt.Printf("Peer Metadata Extension ID: %v\n", m["ut_metadata"])
 
 	} else {
 		fmt.Println("Unknown command: " + command)
