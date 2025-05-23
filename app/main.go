@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/url"
 	"os"
 	"sort"
 	"strconv"
@@ -411,6 +412,11 @@ func main() {
 		os.WriteFile(outputFile, out, 0644)
 		fmt.Println("Download completed successfully.")
 
+	} else if command == "magnet_parse" {
+		magnetLink := os.Args[2]
+		params, _ := url.ParseQuery(magnetLink[8:])
+
+		fmt.Printf("Tracker URL: %s\nInfo Hash: %s\n", params["tr"][0], params["xt"][0][9:])
 	} else {
 		fmt.Println("Unknown command: " + command)
 		os.Exit(1)
