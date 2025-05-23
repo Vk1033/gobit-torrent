@@ -323,6 +323,16 @@ func main() {
 		peerID := string(response[48:68])
 		fmt.Printf("Peer ID: %x\n", peerID)
 
+	} else if command == "download_piece" {
+		outputFile := os.Args[3]
+		fileName := os.Args[4]
+		pieceIndex, err := strconv.Atoi(os.Args[5])
+		if err != nil {
+			fmt.Println("Error converting piece index:", err)
+			return
+		}
+		fmt.Println("Piece Index: ", pieceIndex, "Output File: ", outputFile, "Torrent File: ", fileName)
+
 	} else {
 		fmt.Println("Unknown command: " + command)
 		os.Exit(1)
