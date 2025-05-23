@@ -374,3 +374,77 @@ func downloadPiece(conn net.Conn, pieceIndex int, info map[string]any) ([]byte, 
 	}
 	return pieceBuffer, nil
 }
+
+func getPeersFromMagnet(trackerURL string, infoHash []byte) ([]string, error) {
+	// Parse the magnet link to extract the info hash
+	// In this case, we assume the info hash is already provided as a parameter
+	// You can use a library like "github.com/zeebo/bencode" to decode the magnet link
+	// For simplicity, we will just use the provided info hash directly
+	// Create a new HTTP client
+
+	client := &http.Client{}
+	// Create a new HTTP GET request
+	req, err := http.NewRequest(http.MethodGet, trackerURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	// Set the query parameters for the tracker request
+	url := req.URL.Query()
+	url.Add("info_hash", string(infoHash[:]))
+	url.Add("peer_id", "-AZ2060-123456789012")
+	url.Add("port", "6881")
+	url.Add("uploaded", "0")
+	url.Add("downloaded", "0")
+	url.Add("left", "999")
+	url.Add("compact", "1")
+	req.URL.RawQuery = url.Encode()
+	// Send the request to the tracker
+	res, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer res.Body.Close()
+	// Check if the response status is OK
+	if res.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("tracker response error: %s", res.Status)
+	}
+	// Read the response body
+	bencodedData, err := io.ReadAll(res.Body)
+	if err != nil {
+		return nil, err
+	}
+	// Decode the bencoded data
+	decoded, _, err := decodeBencode(string(bencodedData))
+	if err != nil {
+		return nil, err
+	}
+	// Check if the decoded data is a dictionary
+	dict, ok := decoded.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("invalid bencoded data")
+	}
+	// Extract the peers from the dictionary
+	peers, ok := dict["peers"].(string)
+	if !ok {
+		return nil, fmt.Errorf("invalid bencoded data")
+	}
+	// Convert the peers string to a byte slice
+	peersBytes := []byte(peers)
+	// Check if the length of the peers byte slice is a multiple of 6
+	if len(peersBytes)%6 != 0 {
+		return nil, fmt.Errorf("invalid peers data")
+	}
+	// Create a slice to hold the peer addresses
+	var peerList []string
+	// Iterate over the peers byte slice in chunks of 6 bytes
+	for i := 0; i < len(peersBytes); i += 6 {
+		// Extract the IP address from the first 4 bytes
+		ip := fmt.Sprintf("%d.%d.%d.%d", peersBytes[i], peersBytes[i+1], peersBytes[i+2], peersBytes[i+3])
+		// Extract the port number from the last 2 bytes
+		port := (int(peersBytes[i+4]) << 8) + int(peersBytes[i+5])
+		// Append the peer address to the list
+		peerList = append(peerList, fmt.Sprintf("%s:%d", ip, port))
+	}
+	// Return the list of peer addresses
+	return peerList, nil
+}

@@ -388,7 +388,6 @@ func main() {
 			}
 			var hash [20]byte
 			copy(hash[:], []byte(hashes[i]))
-			// Now you can use 'hash' which is [20]byte
 
 			tasks <- PieceTask{Index: i, Hash: hash, Size: size}
 		}
@@ -417,6 +416,42 @@ func main() {
 		params, _ := url.ParseQuery(magnetLink[8:])
 
 		fmt.Printf("Tracker URL: %s\nInfo Hash: %s\n", params["tr"][0], params["xt"][0][9:])
+	} else if command == "magnet_handshake" {
+		magnetLink := os.Args[2]
+
+		params, _ := url.ParseQuery(magnetLink[8:])
+		trackerURL := params["tr"][0]
+		infoHashHex := params["xt"][0][9:]
+		decodedHash, _ := hex.DecodeString(infoHashHex)
+		var infoHash [20]byte
+		copy(infoHash[:], decodedHash)
+		peerList, err := getPeersFromMagnet(trackerURL, infoHash[:])
+		if err != nil {
+			fmt.Println("Error getting peers:", err)
+			return
+		}
+		// Connect to the first peer
+		conn, err := net.DialTimeout("tcp", peerList[0], 30*time.Second)
+		if err != nil {
+			fmt.Println("Error connecting to peer:", err)
+			return
+		}
+		defer conn.Close()
+		// Perform handshake
+		err = doHandShake(conn, infoHash[:])
+		if err != nil {
+			fmt.Println("Error during handshake:", err)
+			return
+		}
+		// Read the handshake response
+		res, err := readHandShake(conn)
+		if err != nil {
+			fmt.Println("Error reading handshake response:", err)
+			return
+		}
+		peerID := res[48:68]
+		fmt.Printf("Peer ID: %x\n", peerID)
+
 	} else {
 		fmt.Println("Unknown command: " + command)
 		os.Exit(1)
