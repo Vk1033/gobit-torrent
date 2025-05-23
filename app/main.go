@@ -2,99 +2,22 @@ package main
 
 import (
 	"crypto/sha1"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net"
-	"net/http"
 	"os"
 	"sort"
 	"strconv"
 	"time"
-	"unicode"
 	// bencode "github.com/jackpal/bencode-go"
 )
 
 var _ = json.Marshal
 
-func decodeBencode(bencodedString string) (any, int, error) {
-	if unicode.IsDigit(rune(bencodedString[0])) {
-		var firstColonIndex int
-		var i int
-
-		for i = 0; i < len(bencodedString); i++ {
-			if bencodedString[i] == ':' {
-				firstColonIndex = i
-				break
-			}
-		}
-
-		lengthStr := bencodedString[:firstColonIndex]
-
-		length, err := strconv.Atoi(lengthStr)
-		if err != nil {
-			return "", 0, err
-		}
-		return bencodedString[firstColonIndex+1 : firstColonIndex+1+length], i + length, nil
-	} else if rune(bencodedString[0]) == 'i' {
-		var endIndex int
-		var i int
-		for i = 1; i < len(bencodedString); i++ {
-			if bencodedString[i] == 'e' {
-				endIndex = i
-				break
-			}
-		}
-		if endIndex == 0 {
-			return "", 0, fmt.Errorf("INVALID BENCODED INTEGER")
-		}
-		intValue, err := strconv.Atoi(bencodedString[1:endIndex])
-		if err != nil {
-			return "", 0, err
-		}
-		return intValue, i, nil
-	} else if rune(bencodedString[0]) == 'l' {
-		list := []any{}
-		var i int
-		for i = 1; i < len(bencodedString); {
-			if bencodedString[i] == 'e' {
-				break
-			}
-			value, valueLen, err := decodeBencode(bencodedString[i:])
-			if err != nil {
-				return "", 0, err
-			}
-			list = append(list, value)
-			i += valueLen + 1
-
-		}
-
-		return list, i, nil
-	} else if rune(bencodedString[0]) == 'd' {
-		dict := map[string]any{}
-		var i int
-		for i = 1; i < len(bencodedString); {
-			if bencodedString[i] == 'e' {
-				break
-			}
-			key, keyLen, err := decodeBencode(bencodedString[i:])
-			if err != nil {
-				return "", 0, err
-			}
-			i += keyLen + 1
-			value, valueLen, err := decodeBencode(bencodedString[i:])
-			if err != nil {
-				return "", 0, err
-			}
-			dict[fmt.Sprintf("%v", key)] = value
-			i += valueLen + 1
-		}
-		return dict, i, nil
-	}
-
-	return nil, 0, fmt.Errorf("UNSUPPORTED TYPE")
-}
+const BlockSize = 16 * 1024 // 16 KiB
 
 func bencodeEncode(value any) string {
 	switch v := value.(type) {
@@ -202,69 +125,14 @@ func main() {
 			fmt.Println("Invalid bencoded data")
 			return
 		}
-		client := &http.Client{}
 
-		trackerURL := dict["announce"].(string)
-
-		req, err := http.NewRequest(http.MethodGet, trackerURL, nil)
+		peerList, err := getPeers(dict["announce"].(string), info)
 		if err != nil {
+			fmt.Println("Error getting peers:", err)
 			return
 		}
-		encodedInfo := bencodeEncode(info)
-		hash := sha1.Sum([]byte(encodedInfo))
-		infoHash := fmt.Sprintf("%s", hash)
-		length := info["length"].(int)
-
-		peer_id := "-AZ2060-123456789012"
-		url := req.URL.Query()
-		url.Add("info_hash", infoHash)
-		url.Add("peer_id", peer_id)
-		url.Add("port", "6881")
-		url.Add("uploaded", "0")
-		url.Add("downloaded", "0")
-		url.Add("left", strconv.Itoa(length))
-		url.Add("compact", "1")
-		req.URL.RawQuery = url.Encode()
-		res, err := client.Do(req)
-		if err != nil {
-			return
-		}
-
-		defer res.Body.Close()
-
-		if res.StatusCode != http.StatusOK {
-			fmt.Println("Error: ", res.Status)
-			return
-		}
-		bencodedData, err := io.ReadAll(res.Body)
-		if err != nil {
-			fmt.Println("Error reading response body:", err)
-			return
-		}
-		decoded, _, err = decodeBencode(string(bencodedData))
-		if err != nil {
-			fmt.Println(err)
-			return
-		}
-		dict, ok = decoded.(map[string]any)
-		if !ok {
-			fmt.Println("Invalid bencoded data")
-			return
-		}
-		peers, ok := dict["peers"].(string)
-		if !ok {
-			fmt.Println("Invalid bencoded data")
-			return
-		}
-		peersBytes := []byte(peers)
-		if len(peersBytes)%6 != 0 {
-			fmt.Println("Invalid peers data")
-			return
-		}
-		for i := 0; i < len(peersBytes); i += 6 {
-			ip := fmt.Sprintf("%d.%d.%d.%d", peersBytes[i], peersBytes[i+1], peersBytes[i+2], peersBytes[i+3])
-			port := (int(peersBytes[i+4]) << 8) + int(peersBytes[i+5])
-			fmt.Printf("%s:%d\n", ip, port)
+		for _, peer := range peerList {
+			fmt.Println(peer)
 		}
 
 	} else if command == "handshake" {
@@ -301,26 +169,20 @@ func main() {
 		hash := sha1.Sum([]byte(encodedInfo))
 		infoHash := fmt.Sprintf("%s", hash)
 
-		handShake := make([]byte, 68)
-		handShake[0] = 19
-		copy(handShake[1:], "BitTorrent protocol")
-		copy(handShake[28:], infoHash)
-		copy(handShake[48:], "-AZ2060-123456789012")
-		handShake[68-1] = 0
-		_, err = conn.Write(handShake)
+		// Perform handshake
+		err = doHandShake(conn, infoHash)
 		if err != nil {
-			fmt.Println("Error writing handshake:", err)
+			fmt.Println("Error during handshake:", err)
 			return
 		}
-		// Read the response
-		response := make([]byte, 68)
-		_, err = io.ReadFull(conn, response)
+		// Read the handshake response
+		res, err := readHandShake(conn)
+		peerID := res[48:68]
 		if err != nil {
 			fmt.Println("Error reading handshake response:", err)
 			return
 		}
-		// Print Peer ID
-		peerID := string(response[48:68])
+
 		fmt.Printf("Peer ID: %x\n", peerID)
 
 	} else if command == "download_piece" {
@@ -331,7 +193,133 @@ func main() {
 			fmt.Println("Error converting piece index:", err)
 			return
 		}
-		fmt.Println("Piece Index: ", pieceIndex, "Output File: ", outputFile, "Torrent File: ", fileName)
+		data, err := os.ReadFile(fileName)
+		if err != nil {
+			panic(err)
+		}
+		bencodedString := string(data)
+		decoded, _, err := decodeBencode(bencodedString)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		dict, ok := decoded.(map[string]any)
+		if !ok {
+			fmt.Println("Invalid bencoded data")
+			return
+		}
+		info, ok := dict["info"].(map[string]any)
+		if !ok {
+			fmt.Println("Invalid bencoded data")
+			return
+		}
+		peerList, err := getPeers(dict["announce"].(string), info)
+		if err != nil {
+			fmt.Println("Error getting peers:", err)
+			return
+		}
+		// Connect to the first peer
+		conn, err := net.DialTimeout("tcp", peerList[0], 30*time.Second)
+		if err != nil {
+			fmt.Println("Error connecting to peer:", err)
+			return
+		}
+		defer conn.Close()
+		encodedInfo := bencodeEncode(info)
+		hash := sha1.Sum([]byte(encodedInfo))
+		infoHash := fmt.Sprintf("%s", hash)
+		err = doHandShake(conn, infoHash)
+		if err != nil {
+			fmt.Println("Error during handshake:", err)
+			return
+		}
+		_, err = readHandShake(conn)
+		if err != nil {
+			fmt.Println("Error reading handshake response:", err)
+			return
+		}
+
+		_, err = readBitfield(conn)
+		if err != nil {
+			fmt.Println("Error reading bitfield:", err)
+			return
+		}
+		err = sendInterested(conn)
+		if err != nil {
+			fmt.Println("Error sending interested message:", err)
+			return
+		}
+		err = readUnchoke(conn)
+		if err != nil {
+			fmt.Println("Error reading unchoke message:", err)
+			return
+		}
+		pieceLength := int(info["piece length"].(int))
+		begin := 0
+
+		for begin < pieceLength {
+			blockLen := BlockSize
+			if begin+blockLen > pieceLength {
+				blockLen = pieceLength - begin
+			}
+			err := sendRequest(conn, pieceIndex, begin, blockLen)
+			if err != nil {
+				fmt.Printf("Failed to send request: %v\n", err)
+				return
+			}
+			begin += blockLen
+		}
+
+		pieceBuffer := make([]byte, pieceLength)
+		blocksReceived := 0
+
+		for blocksReceived < pieceLength {
+			// Read message length
+			lengthBuf := make([]byte, 4)
+			_, err := io.ReadFull(conn, lengthBuf)
+			if err != nil {
+				fmt.Println("Failed to read message length:", err)
+				return
+			}
+			length := binary.BigEndian.Uint32(lengthBuf)
+
+			// Read full message
+			payload := make([]byte, length)
+			_, err = io.ReadFull(conn, payload)
+			if err != nil {
+				fmt.Println("Failed to read message payload:", err)
+				return
+			}
+
+			if payload[0] != 7 {
+				// Not a piece message, skip or handle
+				continue
+			}
+
+			index := binary.BigEndian.Uint32(payload[1:5])
+			begin := binary.BigEndian.Uint32(payload[5:9])
+			block := payload[9:]
+
+			if int(index) != pieceIndex {
+				fmt.Println("Received block for wrong piece, skipping")
+				continue
+			}
+
+			copy(pieceBuffer[begin:], block)
+			blocksReceived += len(block)
+
+		}
+
+		err = os.WriteFile(outputFile, pieceBuffer, 0644)
+		if err != nil {
+			fmt.Println("Failed to save piece:", err)
+			return
+		}
+		fmt.Println("Piece downloaded and saved successfully.")
+
+		// validate piece
+		calculatedHash := sha1.Sum(pieceBuffer)
+		fmt.Printf("%x\n", calculatedHash)
 
 	} else {
 		fmt.Println("Unknown command: " + command)
