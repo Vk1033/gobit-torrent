@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/sha1"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net"
@@ -10,6 +11,12 @@ import (
 	"strconv"
 	"unicode"
 )
+
+type PieceTask struct {
+	Index int
+	Hash  [20]byte
+	Size  int
+}
 
 func decodeBencode(bencodedString string) (any, int, error) {
 	if unicode.IsDigit(rune(bencodedString[0])) {
@@ -89,7 +96,7 @@ func decodeBencode(bencodedString string) (any, int, error) {
 	return nil, 0, fmt.Errorf("UNSUPPORTED TYPE")
 }
 
-func doHandShake(conn net.Conn, infoHash string) error {
+func doHandShake(conn net.Conn, infoHash []byte) error {
 	handShake := make([]byte, 68)
 	handShake[0] = 19
 	copy(handShake[1:], "BitTorrent protocol")
@@ -254,4 +261,116 @@ func sendRequest(conn net.Conn, index int, begin int, length int) error {
 
 func intToBytes(n int) []byte {
 	return []byte{byte(n >> 24), byte(n >> 16), byte(n >> 8), byte(n)}
+}
+
+func checkIntegrity(pieceBuffer []byte, pieceIndex int, info map[string]any) bool {
+	piecesStr := info["pieces"].(string)
+	bytesPieces := []byte(piecesStr)
+	pieceHash := bytesPieces[pieceIndex*20 : (pieceIndex+1)*20]
+	calculatedHash := sha1.Sum(pieceBuffer)
+
+	return hex.EncodeToString(calculatedHash[:]) == hex.EncodeToString(pieceHash)
+}
+
+func handlePeer(addr string, tasks chan PieceTask, buffer [][]byte, info map[string]any) error {
+	infoHash := sha1.Sum([]byte(bencodeEncode(info)))
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	err = doHandShake(conn, infoHash[:])
+	if err != nil {
+		return err
+	}
+	readHandShake(conn)
+	readBitfield(conn)
+	sendInterested(conn)
+	readUnchoke(conn)
+
+	for task := range tasks {
+		piece, err := downloadPiece(conn, task.Index, info)
+		if err != nil {
+			fmt.Printf("Failed to download piece %d: %v\n", task.Index, err)
+			tasks <- task // requeue
+			continue
+		}
+		check := checkIntegrity(piece, task.Index, info)
+		if !check {
+			tasks <- task // requeue
+			continue
+		}
+		buffer[task.Index] = piece
+	}
+	return nil
+}
+
+func downloadPiece(conn net.Conn, pieceIndex int, info map[string]any) ([]byte, error) {
+	pieceLength := int(info["piece length"].(int))
+	// right after you fetch pieceLength from info
+	totalLength := int(info["length"].(int))
+	numPieces := (totalLength + pieceLength - 1) / pieceLength
+
+	if pieceIndex == numPieces-1 {
+		remaining := totalLength % pieceLength
+		if remaining != 0 {
+			pieceLength = remaining
+		}
+	}
+
+	begin := 0
+
+	for begin < pieceLength {
+		blockLen := BlockSize
+		if begin+blockLen > pieceLength {
+			blockLen = pieceLength - begin
+		}
+		err := sendRequest(conn, pieceIndex, begin, blockLen)
+		if err != nil {
+			fmt.Printf("Failed to send request: %v\n", err)
+			return nil, err
+		}
+		begin += blockLen
+	}
+
+	pieceBuffer := make([]byte, pieceLength)
+	blocksReceived := 0
+
+	for blocksReceived < pieceLength {
+		// Read message length
+		lengthBuf := make([]byte, 4)
+		_, err := io.ReadFull(conn, lengthBuf)
+		if err != nil {
+			fmt.Println("Failed to read message length:", err)
+			return nil, err
+		}
+		length := binary.BigEndian.Uint32(lengthBuf)
+
+		// Read full message
+		payload := make([]byte, length)
+		_, err = io.ReadFull(conn, payload)
+		if err != nil {
+			fmt.Println("Failed to read message payload:", err)
+			return nil, err
+		}
+
+		if payload[0] != 7 {
+			// Not a piece message, skip or handle
+			continue
+		}
+
+		index := binary.BigEndian.Uint32(payload[1:5])
+		begin := binary.BigEndian.Uint32(payload[5:9])
+		block := payload[9:]
+
+		if int(index) != pieceIndex {
+			fmt.Println("Received block for wrong piece, skipping")
+			continue
+		}
+
+		copy(pieceBuffer[begin:], block)
+		blocksReceived += len(block)
+
+	}
+	return pieceBuffer, nil
 }
