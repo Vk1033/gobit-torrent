@@ -100,6 +100,7 @@ func doHandShake(conn net.Conn, infoHash []byte) error {
 	handShake := make([]byte, 68)
 	handShake[0] = 19
 	copy(handShake[1:], "BitTorrent protocol")
+
 	copy(handShake[28:], infoHash)
 	copy(handShake[48:], "-AZ2060-123456789012")
 	handShake[68-1] = 0
@@ -109,6 +110,22 @@ func doHandShake(conn net.Conn, infoHash []byte) error {
 	}
 	return nil
 }
+func doMagnetHandShake(conn net.Conn, infoHash []byte) error {
+	handShake := make([]byte, 68)
+	handShake[0] = 19
+	copy(handShake[1:], "BitTorrent protocol")
+	// extension support
+	handShake[25] = 16
+	copy(handShake[28:], infoHash)
+	copy(handShake[48:], "-AZ2060-123456789012")
+	handShake[68-1] = 0
+	_, err := conn.Write(handShake)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func readHandShake(conn net.Conn) ([]byte, error) {
 	response := make([]byte, 68)
 	_, err := io.ReadFull(conn, response)

@@ -438,7 +438,7 @@ func main() {
 		}
 		defer conn.Close()
 		// Perform handshake
-		err = doHandShake(conn, infoHash[:])
+		err = doMagnetHandShake(conn, infoHash[:])
 		if err != nil {
 			fmt.Println("Error during handshake:", err)
 			return
