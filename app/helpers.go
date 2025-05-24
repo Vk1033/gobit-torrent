@@ -536,31 +536,28 @@ func sendMetadataRequest(conn net.Conn, pieceIndex int, extID byte) error {
 	return err
 }
 
-func readMetadataResponse(conn net.Conn) ([]byte, error) {
-	// Read message length
-	lengthBuf := make([]byte, 4)
-	_, err := io.ReadFull(conn, lengthBuf)
+func readMetadataResponse(conn net.Conn) (metadata map[string]any, err error) {
+	lenBuf := make([]byte, 4)
+	if _, err = io.ReadFull(conn, lenBuf); err != nil {
+		return
+	}
+	msgLen := binary.BigEndian.Uint32(lenBuf)
+
+	msgBuf := make([]byte, msgLen)
+	if _, err = io.ReadFull(conn, msgBuf); err != nil {
+		return
+	}
+
+	// msgID := msgBuf[0]
+	// extID := msgBuf[1]
+	payload := msgBuf[2:]
+	payloadStr := string(payload)
+	_, i, err := decodeBencode(payloadStr)
 	if err != nil {
-		return nil, err
+		fmt.Println("Error", err)
 	}
-	length := binary.BigEndian.Uint32(lengthBuf)
+	metadataDecoded, _, err := decodeBencode(payloadStr[i+1:])
+	metadata = metadataDecoded.(map[string]any)
 
-	// Read message ID
-	messageID := make([]byte, 1)
-	_, err = io.ReadFull(conn, messageID)
-	if err != nil {
-		return nil, err
-	}
-
-	// Read payload
-	payloadLen := int(length) - 1 // Subtract 1 for the message ID
-	payload := make([]byte, payloadLen)
-	if payloadLen > 0 {
-		_, err = io.ReadFull(conn, payload)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	return payload, nil
+	return
 }

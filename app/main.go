@@ -523,55 +523,42 @@ func main() {
 		if err != nil {
 			fmt.Println("Error during handshake:", err)
 		}
-		_, extID, _, err := readExtensionMessage(conn)
+		_, _, header, err := readExtensionMessage(conn)
 		if err != nil {
 			fmt.Println("Error reading handshake response:", err)
 			return
 		}
-		// m := header["m"].(map[string]any)
+		m := header["m"].(map[string]any)
+
 		// send metadata request
-		err = sendMetadataRequest(conn, 0, extID)
+		metaExtID := m["ut_metadata"].(int)
+
+		err = sendMetadataRequest(conn, 0, byte(metaExtID))
 		if err != nil {
 			fmt.Println("Error sending metadata request:", err)
 			return
 		}
-		// // Read metadata response
-		// metadata, err := readMetadataResponse(conn)
-		// if err != nil {
-		// 	fmt.Println("Error reading metadata response:", err)
-		// 	return
-		// }
-		// print("Waiting for metadata response...")
-		// // Decode metadata
-		// metadataStr := string(metadata)
-		// decodedMetadata, _, err := decodeBencode(metadataStr)
-		// if err != nil {
-		// 	fmt.Println("Error decoding metadata:", err)
-		// 	return
-		// }
-		// dict, ok := decodedMetadata.(map[string]any)
-		// if !ok {
-		// 	fmt.Println("Invalid metadata format")
-		// 	return
-		// }
-		// info, ok := dict["info"].(map[string]any)
-		// if !ok {
-		// 	fmt.Println("Invalid metadata format")
-		// 	return
-		// }
-		// encodedInfo := bencodeEncode(info)
-		// hash := sha1.Sum([]byte(encodedInfo))
-		// fmt.Printf("Tracker URL: %s\n", trackerURL)
-		// fmt.Printf("Length: %d\n", info["length"])
-		// fmt.Printf("Info Hash: %x\n", hash)
-		// fmt.Printf("Piece Length: %d\n", info["piece length"])
-		// fmt.Printf("Piece Hashes:\n")
-		// piecesStr := info["pieces"].(string)
-		// bytesPieces := []byte(piecesStr)
-		// for i := 0; i < len(bytesPieces); i += 20 {
-		// 	pieceHash := bytesPieces[i : i+20]
-		// 	fmt.Println(hex.EncodeToString(pieceHash))
-		// }
+		// Read metadata response
+		metadata, err := readMetadataResponse(conn)
+		if err != nil {
+			fmt.Println("Error reading metadata response:", err)
+			return
+		}
+
+		info := metadata
+		encodedInfo := bencodeEncode(info)
+		hash := sha1.Sum([]byte(encodedInfo))
+		fmt.Printf("Tracker URL: %s\n", trackerURL)
+		fmt.Printf("Length: %d\n", info["length"])
+		fmt.Printf("Info Hash: %x\n", hash)
+		fmt.Printf("Piece Length: %d\n", info["piece length"])
+		fmt.Printf("Piece Hashes:\n")
+		piecesStr := info["pieces"].(string)
+		bytesPieces := []byte(piecesStr)
+		for i := 0; i < len(bytesPieces); i += 20 {
+			pieceHash := bytesPieces[i : i+20]
+			fmt.Println(hex.EncodeToString(pieceHash))
+		}
 	} else {
 		fmt.Println("Unknown command: " + command)
 		os.Exit(1)
