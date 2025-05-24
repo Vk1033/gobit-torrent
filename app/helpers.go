@@ -9,7 +9,6 @@ import (
 	"net"
 	"net/http"
 	"strconv"
-	"time"
 	"unicode"
 )
 
@@ -561,55 +560,4 @@ func readMetadataResponse(conn net.Conn) (metadata map[string]any, err error) {
 	metadata = metadataDecoded.(map[string]any)
 
 	return
-}
-
-func magnetHandlePeer(peerAddr string, tasks chan PieceTask, buffer [][]byte, info map[string]any) error {
-	conn, err := net.DialTimeout("tcp", peerAddr, 10*time.Second)
-	if err != nil {
-		return fmt.Errorf("failed to connect to peer: %w", err)
-	}
-	defer conn.Close()
-
-	infoHash := sha1.Sum([]byte(bencodeEncode(info)))
-	err = doMagnetHandShake(conn, infoHash[:])
-	if err != nil {
-		return fmt.Errorf("handshake failed: %w", err)
-	}
-
-	_, err = readHandShake(conn)
-	if err != nil {
-		return fmt.Errorf("failed to read handshake: %w", err)
-	}
-
-	_, err = readBitfield(conn)
-	if err != nil {
-		return fmt.Errorf("failed to read bitfield: %w", err)
-	}
-
-	err = sendInterested(conn)
-	if err != nil {
-		return fmt.Errorf("failed to send interested: %w", err)
-	}
-
-	err = readUnchoke(conn)
-	if err != nil {
-		return fmt.Errorf("failed to read unchoke: %w", err)
-	}
-
-	for task := range tasks {
-		pieceData, err := downloadPiece(conn, task.Index, info)
-		if err != nil {
-			fmt.Printf("failed to download piece %d: %v\n", task.Index, err)
-			continue
-		}
-
-		if !checkIntegrity(pieceData, task.Index, info) {
-			fmt.Printf("piece %d failed integrity check\n", task.Index)
-			continue
-		}
-
-		buffer[task.Index] = pieceData
-	}
-
-	return nil
 }
