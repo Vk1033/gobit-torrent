@@ -476,6 +476,65 @@ func main() {
 		m := header["m"].(map[string]any)
 		fmt.Printf("Peer Metadata Extension ID: %v\n", m["ut_metadata"])
 
+	} else if command == "magnet_info" {
+		magnetLink := os.Args[2]
+		params, _ := url.ParseQuery(magnetLink[8:])
+		trackerURL := params["tr"][0]
+		infoHashHex := params["xt"][0][9:]
+		decodedHash, _ := hex.DecodeString(infoHashHex)
+		var infoHash [20]byte
+		copy(infoHash[:], decodedHash)
+		peerList, err := getPeersFromMagnet(trackerURL, infoHash[:])
+		if err != nil {
+			fmt.Println("Error getting peers:", err)
+			return
+		}
+		// Connect to the first peer
+		conn, err := net.DialTimeout("tcp", peerList[0], 30*time.Second)
+		if err != nil {
+			fmt.Println("Error connecting to peer:", err)
+			return
+		}
+		defer conn.Close()
+		// Perform handshake
+		err = doMagnetHandShake(conn, infoHash[:])
+		if err != nil {
+			fmt.Println("Error during handshake:", err)
+			return
+		}
+		// Read the handshake response
+		res, err := readHandShake(conn)
+		if err != nil {
+			fmt.Println("Error reading handshake response:", err)
+			return
+		}
+		_, err = readBitfield(conn)
+		if err != nil {
+			fmt.Println("Error reading bitfield:", err)
+			return
+		}
+		// check if extension is supported
+		extensionReservedByte := res[25]
+		if extensionReservedByte != 16 {
+			fmt.Println("Peer doesnt support extensions:", err)
+			return
+		}
+		err = sendExtensionHandshake(conn)
+		if err != nil {
+			fmt.Println("Error during handshake:", err)
+		}
+		_, _, _, err = readExtensionMessage(conn)
+		if err != nil {
+			fmt.Println("Error reading handshake response:", err)
+			return
+		}
+		// m := header["m"].(map[string]any)
+		// send metadata request
+		err = sendMetadataRequest(conn, 0)
+		if err != nil {
+			fmt.Println("Error sending metadata request:", err)
+			return
+		}
 	} else {
 		fmt.Println("Unknown command: " + command)
 		os.Exit(1)

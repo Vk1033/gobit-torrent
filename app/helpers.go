@@ -515,3 +515,17 @@ func readExtensionMessage(conn net.Conn) (msgID, extID byte, header map[string]a
 	header = headerDecoded.(map[string]any)
 	return
 }
+
+func sendMetadataRequest(conn net.Conn, pieceIndex int) error {
+	msg := make([]byte, 13)
+	msg[0] = 0
+	msg[1] = 0
+	msg[2] = 0
+	msg[3] = 9                // Message length = 9
+	msg[4] = 20               // Message ID = 20 (extended message)
+	msg[5] = 0                // extension message id
+	msg[6] = byte(pieceIndex) // piece index
+
+	_, err := conn.Write(msg)
+	return err
+}
