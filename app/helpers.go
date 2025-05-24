@@ -516,16 +516,51 @@ func readExtensionMessage(conn net.Conn) (msgID, extID byte, header map[string]a
 	return
 }
 
-func sendMetadataRequest(conn net.Conn, pieceIndex int) error {
-	msg := make([]byte, 13)
-	msg[0] = 0
-	msg[1] = 0
-	msg[2] = 0
-	msg[3] = 9                // Message length = 9
-	msg[4] = 20               // Message ID = 20 (extended message)
-	msg[5] = 0                // extension message id
-	msg[6] = byte(pieceIndex) // piece index
+func sendMetadataRequest(conn net.Conn, pieceIndex int, extID byte) error {
+
+	// Write the payload
+	dict := map[string]any{
+		"msg_type": 0,
+		"piece":    pieceIndex,
+	}
+	bencode := bencodeEncode(dict)
+
+	msgLen := 2 + len(bencode)
+	msg := make([]byte, 4+msgLen)
+	binary.BigEndian.PutUint32(msg[0:4], uint32(msgLen))
+	msg[4] = 20    // Message ID = 20
+	msg[5] = extID // extension message id
+	copy(msg[6:], []byte(bencode))
 
 	_, err := conn.Write(msg)
 	return err
+}
+
+func readMetadataResponse(conn net.Conn) ([]byte, error) {
+	// Read message length
+	lengthBuf := make([]byte, 4)
+	_, err := io.ReadFull(conn, lengthBuf)
+	if err != nil {
+		return nil, err
+	}
+	length := binary.BigEndian.Uint32(lengthBuf)
+
+	// Read message ID
+	messageID := make([]byte, 1)
+	_, err = io.ReadFull(conn, messageID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Read payload
+	payloadLen := int(length) - 1 // Subtract 1 for the message ID
+	payload := make([]byte, payloadLen)
+	if payloadLen > 0 {
+		_, err = io.ReadFull(conn, payload)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return payload, nil
 }
