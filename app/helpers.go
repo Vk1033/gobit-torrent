@@ -342,6 +342,7 @@ func downloadPiece(conn net.Conn, pieceIndex int, info map[string]any) ([]byte, 
 		if begin+blockLen > pieceLength {
 			blockLen = pieceLength - begin
 		}
+		fmt.Printf("Requesting piece %d, block starting at %d, length %d\n", pieceIndex, begin, blockLen)
 		err := sendRequest(conn, pieceIndex, begin, blockLen)
 		if err != nil {
 			fmt.Printf("Failed to send request: %v\n", err)
@@ -354,6 +355,7 @@ func downloadPiece(conn net.Conn, pieceIndex int, info map[string]any) ([]byte, 
 	blocksReceived := 0
 
 	for blocksReceived < pieceLength {
+		fmt.Printf("Waiting for piece %d, blocks received: %d\n", pieceIndex, blocksReceived)
 		// Read message length
 		lengthBuf := make([]byte, 4)
 		_, err := io.ReadFull(conn, lengthBuf)

@@ -559,6 +559,164 @@ func main() {
 			pieceHash := bytesPieces[i : i+20]
 			fmt.Println(hex.EncodeToString(pieceHash))
 		}
+	} else if command == "magnet_download_piece" {
+		magnetLink := os.Args[4]
+		pieceIndex, err := strconv.Atoi(os.Args[5])
+		if err != nil {
+			fmt.Println("Error converting piece index:", err)
+			return
+		}
+		outputFile := os.Args[3]
+
+		params, _ := url.ParseQuery(magnetLink[8:])
+		trackerURL := params["tr"][0]
+		infoHashHex := params["xt"][0][9:]
+		decodedHash, _ := hex.DecodeString(infoHashHex)
+		var infoHash [20]byte
+		copy(infoHash[:], decodedHash)
+		peerList, err := getPeersFromMagnet(trackerURL, infoHash[:])
+		if err != nil {
+			fmt.Println("Error getting peers:", err)
+			return
+		}
+		// Connect to the first peer
+		conn, err := net.DialTimeout("tcp", peerList[0], 30*time.Second)
+		if err != nil {
+			fmt.Println("Error connecting to peer:", err)
+			return
+		}
+		defer conn.Close()
+		// Perform handshake
+		err = doMagnetHandShake(conn, infoHash[:])
+		if err != nil {
+			fmt.Println("Error during handshake:", err)
+			return
+		}
+		// Read the handshake response
+		res, err := readHandShake(conn)
+		if err != nil {
+			fmt.Println("Error reading handshake response:", err)
+			return
+		}
+
+		_, err = readBitfield(conn)
+		if err != nil {
+			fmt.Println("Error reading bitfield:", err)
+			return
+		}
+		// check if extension is supported
+		extensionReservedByte := res[25]
+		if extensionReservedByte != 16 {
+			fmt.Println("Peer doesnt support extensions:", err)
+			return
+		}
+		err = sendExtensionHandshake(conn)
+		if err != nil {
+			fmt.Println("Error during handshake:", err)
+			return
+		}
+		_, _, header, err := readExtensionMessage(conn)
+		if err != nil {
+			fmt.Println("Error reading handshake response:", err)
+			return
+		}
+		m := header["m"].(map[string]any)
+		metaExtID := m["ut_metadata"].(int)
+		err = sendMetadataRequest(conn, 0, byte(metaExtID))
+		if err != nil {
+			fmt.Println("Error sending metadata request:", err)
+			return
+		}
+		// Read metadata response
+		metadata, err := readMetadataResponse(conn)
+		if err != nil {
+			fmt.Println("Error reading metadata response:", err)
+			return
+		}
+		info := metadata
+		err = sendInterested(conn)
+		if err != nil {
+			fmt.Println("Error sending interested message:", err)
+			return
+		}
+		err = readUnchoke(conn)
+		if err != nil {
+			fmt.Println("Error reading unchoke message:", err)
+			return
+		}
+		pieceLength := int(info["piece length"].(int))
+		// right after you fetch pieceLength from info
+		totalLength := int(info["length"].(int))
+		numPieces := (totalLength + pieceLength - 1) / pieceLength
+		if pieceIndex == numPieces-1 {
+			remaining := totalLength % pieceLength
+			if remaining != 0 {
+				pieceLength = remaining
+			}
+		}
+		begin := 0
+		for begin < pieceLength {
+			blockLen := BlockSize
+			if begin+blockLen > pieceLength {
+				blockLen = pieceLength - begin
+			}
+			err := sendRequest(conn, pieceIndex, begin, blockLen)
+			if err != nil {
+				fmt.Printf("Failed to send request: %v\n", err)
+				return
+			}
+			begin += blockLen
+		}
+		pieceBuffer := make([]byte, pieceLength)
+		blocksReceived := 0
+		for blocksReceived < pieceLength {
+			// Read message length
+			lengthBuf := make([]byte, 4)
+			_, err := io.ReadFull(conn, lengthBuf)
+			if err != nil {
+				fmt.Println("Failed to read message length:", err)
+				return
+			}
+			length := binary.BigEndian.Uint32(lengthBuf)
+
+			// Read full message
+			payload := make([]byte, length)
+			_, err = io.ReadFull(conn, payload)
+			if err != nil {
+				fmt.Println("Failed to read message payload:", err)
+				return
+			}
+
+			if payload[0] != 7 {
+				// Not a piece message, skip or handle
+				continue
+			}
+
+			index := binary.BigEndian.Uint32(payload[1:5])
+			begin := binary.BigEndian.Uint32(payload[5:9])
+			block := payload[9:]
+
+			if int(index) != pieceIndex {
+				fmt.Println("Received block for wrong piece, skipping")
+				continue
+			}
+
+			copy(pieceBuffer[begin:], block)
+			blocksReceived += len(block)
+
+		}
+		err = os.WriteFile(outputFile, pieceBuffer, 0644)
+		if err != nil {
+			fmt.Println("Failed to save piece:", err)
+			return
+		}
+		fmt.Println("Piece downloaded and saved successfully.")
+		// validate piece
+		ifValidPiece := checkIntegrity(pieceBuffer, pieceIndex, info)
+		if ifValidPiece {
+			fmt.Println("Piece integrity check passed.")
+		}
+
 	} else {
 		fmt.Println("Unknown command: " + command)
 		os.Exit(1)
