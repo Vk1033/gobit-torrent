@@ -717,6 +717,114 @@ func main() {
 			fmt.Println("Piece integrity check passed.")
 		}
 
+	} else if command == "magnet_download" {
+		outputFile := os.Args[3]
+		magnetLink := os.Args[4]
+
+		params, _ := url.ParseQuery(magnetLink[8:])
+		infoHashHex := params["xt"][0][9:]
+		decodedHash, _ := hex.DecodeString(infoHashHex)
+		var infoHash [20]byte
+		copy(infoHash[:], decodedHash)
+		trackerURL := params["tr"][0]
+
+		peerList, err := getPeersFromMagnet(trackerURL, infoHash[:])
+		if err != nil {
+			fmt.Println("Error getting peers:", err)
+			return
+		}
+
+		conn, err := net.DialTimeout("tcp", peerList[0], 10*time.Second)
+		if err != nil {
+			fmt.Println("Error connecting to peer:", err)
+			return
+		}
+
+		if err = doMagnetHandShake(conn, infoHash[:]); err != nil {
+			fmt.Println("Handshake failed:", err)
+			return
+		}
+		handshake, err := readHandShake(conn)
+		if err != nil {
+			fmt.Println("Error reading handshake:", err)
+			return
+		}
+		if _, err = readBitfield(conn); err != nil {
+			fmt.Println("Error reading bitfield:", err)
+			return
+		}
+
+		if handshake[25] != 0x10 {
+			fmt.Println("Peer doesn't support extensions")
+			return
+		}
+
+		if err = sendExtensionHandshake(conn); err != nil {
+			fmt.Println("Extension handshake failed:", err)
+			return
+		}
+		_, _, header, err := readExtensionMessage(conn)
+		if err != nil {
+			fmt.Println("Error reading extension message:", err)
+			return
+		}
+		metaExtID := header["m"].(map[string]any)["ut_metadata"].(int)
+
+		if err = sendMetadataRequest(conn, 0, byte(metaExtID)); err != nil {
+			fmt.Println("Metadata request failed:", err)
+			return
+		}
+		info, err := readMetadataResponse(conn)
+		if err != nil {
+			fmt.Println("Error reading metadata:", err)
+			return
+		}
+		conn.Close()
+
+		numPieces := int(info["length"].(int)) / int(info["piece length"].(int))
+		if int(info["length"].(int))%int(info["piece length"].(int)) != 0 {
+			numPieces++
+		}
+		pieceLength := int(info["piece length"].(int))
+		totalLength := int(info["length"].(int))
+		piecesStr := info["pieces"].(string)
+		bytesPieces := []byte(piecesStr)
+		hashes := make([]string, numPieces)
+		for i := 0; i < len(bytesPieces); i += 20 {
+			pieceHash := bytesPieces[i : i+20]
+			hashes[i/20] = hex.EncodeToString(pieceHash)
+		}
+		tasks := make(chan PieceTask, numPieces)
+		for i := 0; i < numPieces; i++ {
+			size := pieceLength
+			if i == numPieces-1 && totalLength%pieceLength != 0 {
+				size = totalLength % pieceLength
+			}
+			var hash [20]byte
+			copy(hash[:], []byte(hashes[i]))
+
+			tasks <- PieceTask{Index: i, Hash: hash, Size: size}
+		}
+		close(tasks)
+		buffer := make([][]byte, totalLength)
+		var wg sync.WaitGroup
+		for _, peer := range peerList {
+			wg.Add(1)
+			go func(peerAddr string) {
+				defer wg.Done()
+
+				err := handlePeer(peerAddr, tasks, buffer, info)
+				if err != nil {
+					fmt.Println("Worker failed:", err)
+				}
+			}(peer)
+		}
+		wg.Wait()
+		// Merge buffer and save to disk
+		out := bytes.Join(buffer, nil)
+		os.WriteFile(outputFile, out, 0644)
+		fmt.Println("Download completed successfully.")
+
 	} else {
 		fmt.Println("Unknown command: " + command)
 		os.Exit(1)
